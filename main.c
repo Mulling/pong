@@ -5,7 +5,6 @@
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/ip.h>
-#include <netinet/ip_icmp.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -16,18 +15,23 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <linux/icmp.h>
+
+#include "utils.c"
 
 char *dha = NULL; // destiny host name
 
-uint16_t seq = 1;
 uint32_t ttl = 64;
+uint64_t seq = 1;
 uint64_t sentnum = 0;
 uint64_t recvnum = 0;
 
 suseconds_t hrtt = 0;
-suseconds_t lrtt = 0xEFFFFFFF;
+suseconds_t lrtt = 0x7FFFFFFF;
 suseconds_t ortt = 0;
 suseconds_t nrtt = 0;
+
+uint8_t recvtable[MAXDUP / 8] = {0};
 
 volatile bool r = true; // running
 
@@ -55,18 +59,9 @@ uint16_t checksum(const uint16_t *buffer, size_t len){
     return (uint16_t)~sum;
 }
 
-#ifdef DEBUG
-#define ERROR(msg)                                                  \
-        fprintf(stderr, __FILE__":%d error: %s \n", __LINE__, msg); \
-        exit(1);
-#else
-#define ERROR(msg)                                 \
-        fprintf(stderr, "pong: error: %s\n", msg); \
-        exit(1);
-#endif
-
+static
 char *get_host_addr(const char *hname){
-    static char host[NI_MAXHOST];
+    static char host[NI_MAXHOST] = {0};
 
     struct addrinfo h;
     struct addrinfo *res;
@@ -91,75 +86,91 @@ char *get_host_addr(const char *hname){
     return haddr;
 }
 
-// mock function, avoid calling sleep with 0
-static inline
-uint32_t nullfn(uint32_t){
-    return 0;
+static
+int initsock(pid_t pid){
+    int socketd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (socketd < 0){ ERROR("Fail to create a socket, run with root privileges..."); }
+
+    int on = 1;
+	if (setsockopt(socketd, IPPROTO_IP, IP_HDRINCL, &on, sizeof(on)) == -1){
+        ERROR("setsockopt IP_HDRINCL");
+	}
+    if (setsockopt(socketd, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on)) == -1){
+        ERROR("setsockopt SO_BROADCAST");
+    }
+
+    struct timeval timeo;
+    timeo.tv_sec = RCVTIMEOUT;
+    timeo.tv_usec = 0;
+    if (setsockopt(socketd, SOL_SOCKET, SO_RCVTIMEO, &timeo, sizeof(timeo)) == -1){
+        ERROR("setsockopt SO_RCVTIMEO");
+    }
+    if (setsockopt(socketd, SOL_SOCKET, SO_SNDTIMEO, &timeo, sizeof(timeo)) == -1){
+        ERROR("setsockopt SO_SNDTIMEO");
+    }
+
+    struct icmp_filter echofilter;
+    echofilter.data = ICMP_ECHOREPLY;
+    if (setsockopt(socketd, SOL_RAW, ICMP_FILTER, &echofilter, sizeof(echofilter)) == -1){
+        ERROR("setsockopt ICMP_FILTER");
+    }
+
+    (void)(pid);
+    // TODO: figure this out
+    // struct sock_fprog idfilter;
+    // setsockopt(sock, SOL_SOCKET, SO_ATTACH_FILTER, &filter, sizeof filter);
+
+    return socketd;
+
 }
 
-#define SLEEPTIME 1
-#define PAYLOADSIZE 56
-#define RCVTIMEOUT 1
+static inline
+bool checkdup(const uint16_t bit){
+    if(recvtable[bit >> 3] & (1 << (bit & 0x07))){
+        return true;
+    }
+    recvtable[bit >> 3] |= (1 << (bit & 0x07));
+    return false;
+}
 
-#define HDRFMT "PONGING %s %d bytes of data (%lu total).\n"
-#define OUTFMT "%d bytes from %s icmp_seg=%d ttl=%u time=%.1fms"
-#define TMOFMT "timeout(%ds) for icmp_seq=%d\n"
-
-void ping(const in_addr_t daddr, const uint8_t ttl, uint32_t(*sleepfn)(uint32_t)){
+void ping(const in_addr_t daddr, const uint8_t ttl){
     size_t packetsize = sizeof(struct iphdr) + sizeof(struct icmphdr) + PAYLOADSIZE;
 
     uint8_t *packetreq = calloc(sizeof(uint8_t), packetsize);
     uint8_t *packetrep = calloc(sizeof(uint8_t), packetsize);
     if (!packetreq || !packetrep) { ERROR("Fail to allocate memory..."); }
 
+    static const size_t icmpoff = sizeof(struct iphdr);
+    static const size_t timeoff = icmpoff + sizeof(struct icmphdr);
+
     struct iphdr *ip = (struct iphdr*)packetreq;
-    struct icmphdr *icmp = (struct icmphdr*)(packetreq + sizeof(struct iphdr));
-    struct timeval *timestamp = (struct timeval*)(packetreq + sizeof(struct iphdr) + sizeof(struct icmphdr));
+    struct icmphdr *icmp = (struct icmphdr*)(packetreq + icmpoff);
+    struct timeval *timestamp = (struct timeval*)(packetreq + timeoff);
 
     struct iphdr *iprep = (struct iphdr*)packetrep;
-    struct icmphdr *icmprep = (struct icmphdr*)(packetrep + sizeof(struct iphdr));
-    struct timeval *timestamprep = (struct timeval*)(packetrep + sizeof(struct iphdr) + sizeof(struct icmphdr));
+    struct icmphdr *icmprep = (struct icmphdr*)(packetrep + icmpoff);
+    struct timeval *timestamprep = (struct timeval*)(packetrep + timeoff);
 
-    int socketd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (socketd < 0){ ERROR("Fail to create a socket, run with root privileges..."); }
-
-    int on = 1;
-	if (setsockopt(socketd, IPPROTO_IP, IP_HDRINCL, 
-                (const char*)&on, sizeof (on)) == -1) {
-        ERROR("setsockopt IP_HDRINCL");
-	}
-    if (setsockopt(socketd, SOL_SOCKET, SO_BROADCAST, 
-                (const char*)&on, sizeof(on)) == -1){
-        ERROR("setsockopt SO_BROADCAST");
-    }
-    struct timeval timeo;
-    timeo.tv_sec = RCVTIMEOUT;
-    timeo.tv_usec = 0;
-    if (setsockopt(socketd, SOL_SOCKET, SO_RCVTIMEO,
-                (const char*)&timeo, sizeof(timeo)) == -1){
-        ERROR("setsockopt SO_RCVTIMEO");
-    }
-
-    pid_t pid = getpid();
-
+    pid_t pid;
+    int socketd = initsock((pid = getpid()));
     ip->version = 4;
     ip->ihl = 5;
     ip->tos = 0;
     ip->tot_len = htons(PAYLOADSIZE);
     ip->id = htonl(pid);
-    ip->ttl = ttl;
     ip->protocol = IPPROTO_ICMP;
+    ip->ttl = ttl;
     ip->daddr = daddr;
 
     icmp->type = ICMP_ECHO;
     icmp->code = 0;
-    icmp->un.echo.sequence = htons(seq);
+    icmp->un.echo.sequence = htons((uint16_t)seq);
     icmp->un.echo.id = htonl(pid);
 
     struct sockaddr_in servaddr;
 	servaddr.sin_family = AF_INET;
 	servaddr.sin_addr.s_addr = daddr;
-	memset(&servaddr.sin_zero, 0, sizeof (servaddr.sin_zero));
+	memset(&servaddr.sin_zero, 0, sizeof(servaddr.sin_zero));
 
     int32_t sentsize = 0;
     int32_t recvsize = 0;
@@ -167,37 +178,33 @@ void ping(const in_addr_t daddr, const uint8_t ttl, uint32_t(*sleepfn)(uint32_t)
     struct timeval timenow;
     struct timeval timedif;
 
-    fprintf(stdout, HDRFMT, dha, PAYLOADSIZE, packetsize);
-    fflush(stdout);
+    fprintf(stdout, HDRFMT, dha, PAYLOADSIZE, packetsize); fflush(stdout);
     while (r){
 send:
+        recvtable[((sentnum + 1) % MAXDUP) >> 3] &= ~(1 << (((sentnum + 1) % MAXDUP) & 0x07));
         gettimeofday(timestamp, NULL);
         icmp->checksum = 0;
         icmp->checksum = checksum((uint16_t*)icmp, sizeof(struct icmphdr) + PAYLOADSIZE);
         // TODO: replace sendto and recvfrom with sendmsg and recvmsg :)
-        if ((sentnum++, sentsize = sendto(socketd, packetreq, packetsize, 0, 
+        if ((sentnum++, sentsize = sendto(socketd, packetreq, packetsize, 0,
                         (struct sockaddr*)&servaddr, sizeof(servaddr))) < 1){
-            sleepfn(SLEEPTIME);
-            // fprintf(stderr,"Fail to pong, check your connection...");
-            // fflush(stderr);
             goto send; // if we can't send keep trying.
         }
 
-        if ((recvsize = recvfrom(socketd, packetrep, packetsize, 0, NULL, NULL)) == -1 && errno != EINTR){
-            fprintf(stderr, TMOFMT, RCVTIMEOUT, ntohs(icmprep->un.echo.sequence));
-            fflush(stderr);
+        if ((recvsize = recvfrom(socketd, packetrep, packetsize, 0, NULL, NULL)) == -1 && !(errno & EINTR)){
+            fprintf(stderr, TMOFMT, RCVTIMEOUT, ntohs(icmp->un.echo.sequence)); fflush(stderr);
             goto send; // we didn't get a reply in time, send again with the same seq
         }
         else if (errno & EINTR){
-            continue;
+            --sentnum; // if we got were recvfrom was interrupted, ignore the last package we sent
+            break;
         }
-
-        recvnum++;
-
+        ++recvnum;
         gettimeofday(&timenow, NULL);
 
         // TODO: check for ECHO_REPLY codes
         // TODO: check the checksum?
+        // TODO: there is a bug when pinging localhost, works fine if flooding, caused by sleep?
 
         timersub(&timenow, timestamprep, &timedif); // use the time stored in the packet
         nrtt = timedif.tv_sec * 10000 + timedif.tv_usec;
@@ -209,43 +216,46 @@ send:
             ortt = ((7/8.) * (float)ortt) + ((float)nrtt * (1/8.));
 
         fprintf(stdout, OUTFMT, recvsize, dha, ntohs(icmprep->un.echo.sequence), iprep->ttl, nrtt/1000.0);
-        fprintf(stdout, (htons(icmprep->un.echo.sequence) < seq ? "DUP\n" : "\n")); 
-        // if the packet seq is lower than seq signal a DUP
-        // following the behaviour of ping, DUPs are not counted
-        // as lost packets.
+        fprintf(stdout, (checkdup(htons(icmprep->un.echo.sequence) % MAXDUP) ? DUPFMT: "\n"));
+        // following the behaviour of ping, DUPs are not counted as lost packets.
         fflush(stdout);
-
-        sleepfn(SLEEPTIME);
 
         icmp->un.echo.sequence = htons(++seq);
     }
 }
 
 static
-void siginth(int){
+void siginth(int x){
+    (void)(x);
     r = false;
-    fprintf(stdout,"\b\b"); // erase ^C
-    fflush(stdout);
 }
-
-#define RESFMT0 "RESULTS:\n"
-#define RESFMT1 "sent=%lu received=%lu (%.1f%% packet loss)\n"
-#define RESFMT2 "min=%.1fms rtt=%.1fms max=%.1fms\n"
 
 static
 void results(void){
     if (sentnum | recvnum) fprintf(stdout, RESFMT0);
-    if (sentnum) fprintf(stdout, RESFMT1, sentnum, recvnum,100 - (100  * recvnum / (float)sentnum));
+    if (sentnum) fprintf(stdout, RESFMT1, sentnum, recvnum,100 - (100 * recvnum / (float)sentnum));
     if (recvnum) fprintf(stdout, RESFMT2, lrtt / 1000.0, ortt / 1000.0, hrtt / 1000.0);
 }
 
 int main(const int argc, const char **argv){
-    if (argc != 2){
+    if (argc < 2){
         usage();
         exit(0);
     }
 
-    // TODO: parse the args
+    for (int i = 2; i < argc; i+=2){
+        if (argv[i][0] != '-' && strlen(argv[i]) != 2) { die: atexit(usage); ERROR("Unkown argument..."); }
+        switch (argv[i][1]){
+            case 'f':
+                // TODO:
+                break;
+            case 't':
+                ttl = atoi(argv[i + 1]);
+                break;
+            default:
+                goto die;
+        }
+    }
 
     struct sigaction new;
     new.sa_handler = siginth;
@@ -259,7 +269,7 @@ int main(const int argc, const char **argv){
 
     atexit(results);
 
-    ping(inet_addr((dha = get_host_addr(argv[1]))), ttl, sleep);
+    ping(inet_addr((dha = get_host_addr(argv[1]))), ttl);
 
     return 0;
 }
