@@ -118,7 +118,7 @@ void ping(const in_addr_t daddr, const uint8_t ttl, uint32_t(*sleepfn)(uint32_t)
     struct icmphdr *icmp = (struct icmphdr*)(packetreq + sizeof(struct iphdr));
     struct timeval *timestamp = (struct timeval*)(packetreq + sizeof(struct iphdr) + sizeof(struct icmphdr));
 
-    struct iphdr *iprep = (struct iphdr*)packetreq;
+    struct iphdr *iprep = (struct iphdr*)packetrep;
     struct icmphdr *icmprep = (struct icmphdr*)(packetrep + sizeof(struct iphdr));
     struct timeval *timestamprep = (struct timeval*)(packetrep + sizeof(struct iphdr) + sizeof(struct icmphdr));
 
@@ -191,7 +191,11 @@ send:
             fprintf(stderr, TMOFMT, RCVTIMEOUT, ntohs(icmprep->un.echo.sequence));
             fflush(stderr);
             goto send; // we didn't get a reply in time, send again with the same seq
-        } 
+        }
+        else if (errno & EINTR){
+            continue;
+        }
+
         recvnum++;
 
         gettimeofday(&timenow, NULL);
