@@ -110,9 +110,7 @@ void ping(const in_addr_t daddr, const uint8_t ttl, uint32_t(*sleepfn)(uint32_t)
 
     uint8_t *packetreq = calloc(sizeof(uint8_t), packetsize);
     uint8_t *packetrep = calloc(sizeof(uint8_t), packetsize);
-    if (!packetreq || !packetrep) {
-        ERROR("Fail to allocate memory...");
-    }
+    if (!packetreq || !packetrep) { ERROR("Fail to allocate memory..."); }
 
     struct iphdr *ip = (struct iphdr*)packetreq;
     struct icmphdr *icmp = (struct icmphdr*)(packetreq + sizeof(struct iphdr));
@@ -123,9 +121,7 @@ void ping(const in_addr_t daddr, const uint8_t ttl, uint32_t(*sleepfn)(uint32_t)
     struct timeval *timestamprep = (struct timeval*)(packetrep + sizeof(struct iphdr) + sizeof(struct icmphdr));
 
     int socketd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (socketd < 0){
-        ERROR("Fail to create a socket, run with root privileges...");
-    }
+    if (socketd < 0){ ERROR("Fail to create a socket, run with root privileges..."); }
 
     int on = 1;
 	if (setsockopt(socketd, IPPROTO_IP, IP_HDRINCL, 
@@ -139,7 +135,7 @@ void ping(const in_addr_t daddr, const uint8_t ttl, uint32_t(*sleepfn)(uint32_t)
     struct timeval timeo;
     timeo.tv_sec = RCVTIMEOUT;
     timeo.tv_usec = 0;
-    if(setsockopt(socketd, SOL_SOCKET, SO_RCVTIMEO,
+    if (setsockopt(socketd, SOL_SOCKET, SO_RCVTIMEO,
                 (const char*)&timeo, sizeof(timeo)) == -1){
         ERROR("setsockopt SO_RCVTIMEO");
     }
@@ -232,14 +228,15 @@ void siginth(int){
     fflush(stdout);
 }
 
-#define RESFMT                                     \
-    "RESULTS:\n"                                   \
-    "sent=%lu received=%lu (%.1f%% packet loss)\n" \
-    "min=%.1fms rtt=%.1fms max=%.1fms\n"
+#define RESFMT0 "RESULTS:\n"
+#define RESFMT1 "sent=%lu received=%lu (%.1f%% packet loss)\n"
+#define RESFMT2 "min=%.1fms rtt=%.1fms max=%.1fms\n"
+
 static
 void results(void){
-    fprintf(stdout, RESFMT, sentnum, recvnum,100 - (100  * sentnum / (float)recvnum),
-            lrtt / 1000.0, ortt / 1000.0, hrtt / 1000.0);
+    if (sentnum | recvnum) fprintf(stdout, RESFMT0);
+    if (sentnum) fprintf(stdout, RESFMT1, sentnum, recvnum,100 - (100  * recvnum / (float)sentnum));
+    if (recvnum) fprintf(stdout, RESFMT2, lrtt / 1000.0, ortt / 1000.0, hrtt / 1000.0);
 }
 
 int main(const int argc, const char **argv){
