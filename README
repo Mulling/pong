@@ -6,7 +6,7 @@ Why sudo? this is required to give permissions to the program, since only root r
 create RAW sockets, release will give the same permissions of /usr/bin/ping to pong.
 
 USING:
-    pong [target] [-f] [-t time_to_live]
+    pong [target] [[-f] [-t time_to_live]]
 
 OPTIONS:
     target 
@@ -14,7 +14,7 @@ OPTIONS:
 
     -f 
         Flood ping. Send ECHO_REQUEST and wait for ECHO_REPLY. Without waiting for
-        SLEEPTIME, which defaults to 1 second.
+        SO_RCVTIMEO, SO_SNDTIMEO and RCVTIMEO , which defaults to 1 second.
 
     -t 
         Set the time to live, defaults to 64.
