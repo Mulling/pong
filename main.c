@@ -94,7 +94,7 @@ char *get_host_addr(const char *hname){
 }
 
 static
-int initsock(pid_t pid){
+int initsock(uint16_t pid){
     int socketd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (socketd < 0){ ERROR("Fail to create a socket, run with root privileges..."); }
 
@@ -171,13 +171,13 @@ void ping(const in_addr_t daddr, const uint8_t ttl){
     struct icmphdr *icmprep = (struct icmphdr*)(packetrep + icmpoff);
     struct timeval *timestamprep = (struct timeval*)(packetrep + timeoff);
 
-    pid_t pid;
-    int socketd = initsock((pid = getpid()));
+    pid_t pid = getpid();
+    uint16_t id = (uint16_t)(pid >> 16) ^ (pid & 0xFF);
+    int socketd = initsock(id);
     ip->version = 4;
     ip->ihl = 5;
     ip->tos = 0;
     ip->tot_len = htons(PAYLOADSIZE);
-    ip->id = htonl(pid);
     ip->protocol = IPPROTO_ICMP;
     ip->ttl = ttl;
     ip->daddr = daddr;
@@ -185,12 +185,12 @@ void ping(const in_addr_t daddr, const uint8_t ttl){
     icmp->type = ICMP_ECHO;
     icmp->code = 0;
     icmp->un.echo.sequence = htons((uint16_t)seq);
-    icmp->un.echo.id = htonl(pid);
+    icmp->un.echo.id = id;
 
     struct sockaddr_in servaddr;
-	servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = daddr;
-	memset(&servaddr.sin_zero, 0, sizeof(servaddr.sin_zero));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = daddr;
+    memset(&servaddr.sin_zero, 0, sizeof(servaddr.sin_zero));
 
     int32_t sentsize = 0;
     int32_t recvsize = 0;
@@ -208,9 +208,9 @@ send:
                         (struct sockaddr*)&servaddr, sizeof(servaddr))) < 1){
             goto send; // if we can't send keep trying.
         }
-
+recv:
         if ((recvsize = recvfrom(socketd, packetrep, packetsize, MSG_WAITALL, NULL, NULL)) == -1 && !(errno & EINTR)){
-            fprintf(stderr, TMOFMT, RCVTIMEO, ntohs(icmp->un.echo.sequence)); fflush(stderr);
+            // fprintf(stderr, TMOFMT, RCVTIMEO, ntohs(icmp->un.echo.sequence)); fflush(stderr);
             goto send; // we didn't get a reply in time, send again with the same seq
         }
         else if (errno & EINTR){
@@ -222,16 +222,18 @@ send:
 
         switch ((++recvnum, icmprep->type)){
             case ICMP_ECHOREPLY:
+                // got something that is not ours
+                if (icmprep->un.echo.id != id) goto recv;
                 calcrtt(timestamprep);
                 fprintf(stdout, OUTFMT, recvsize, dha, ntohs(icmprep->un.echo.sequence), iprep->ttl, nrtt/1000.0);
                 fprintf(stdout, (checkdup(htons(icmprep->un.echo.sequence) % MAXDUP) ? DUPFMT: "\n"));
                 // following the behaviour of ping, DUPs are not counted as lost packets.
                 break;
             case ICMP_TIME_EXCEEDED:
-                // TODO:
+                fprintf(stdout, EXCFMT, ttl);
                 break;
             case ICMP_DEST_UNREACH:
-                // TODO:
+                fprintf(stdout, UNRFMT);
                 break;
             default:
                 break;
@@ -254,7 +256,7 @@ static
 void results(void){
     if (sentnum | recvnum) fprintf(stdout, RESFMT0);
     if (sentnum) fprintf(stdout, RESFMT1, sentnum, recvnum,100 - (100 * recvnum / (float)sentnum));
-    if (recvnum & ortt) fprintf(stdout, RESFMT2, lrtt / 1000.0, ortt / 1000.0, hrtt / 1000.0);
+    if (recvnum && ortt) fprintf(stdout, RESFMT2, lrtt / 1000.0, ortt / 1000.0, hrtt / 1000.0);
 }
 
 int main(const int argc, const char **argv){
