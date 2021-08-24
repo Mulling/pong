@@ -1,8 +1,7 @@
 // See LICENSE for license details.
 #define MAXDUP 0x1000 // from ping.c
-#define SLEEPTIME 1
 #define PAYLOADSIZE 56
-#define RCVTIMEOUT 1
+#define RCVTIMEO 1
 
 #define HDRFMT "PONGING %s %d bytes of data (%lu total).\n"
 #define OUTFMT "%d bytes from %s icmp_seq=%d ttl=%u time=%.1fms"

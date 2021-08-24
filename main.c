@@ -33,13 +33,20 @@ suseconds_t nrtt = 0;
 
 uint8_t recvtable[MAXDUP / 8] = {0};
 
-volatile bool r = true; // running
+bool r = true; // running
+
+bool f = false;
+
+uint32_t(*sleepfn)(uint32_t) = sleep;
+
+static
+uint32_t nullfn(uint32_t x){ (void)x; return 0; };
 
 static
 void usage(void){
     fprintf(stderr,
             "usage:\n"
-            "\t./pong [target] [-f] [-t time_to_live]\n");
+            "\t./pong [target] [[-f] [-t time_to_live]]\n");
 }
 
 // source: https://datatracker.ietf.org/doc/html/rfc1071
@@ -95,12 +102,9 @@ int initsock(pid_t pid){
 	if (setsockopt(socketd, IPPROTO_IP, IP_HDRINCL, &on, sizeof(on)) == -1){
         ERROR("setsockopt IP_HDRINCL");
 	}
-    if (setsockopt(socketd, SOL_SOCKET, SO_BROADCAST, &on, sizeof(on)) == -1){
-        ERROR("setsockopt SO_BROADCAST");
-    }
 
     struct timeval timeo;
-    timeo.tv_sec = RCVTIMEOUT;
+    timeo.tv_sec = f ? 0 : RCVTIMEO;
     timeo.tv_usec = 0;
     if (setsockopt(socketd, SOL_SOCKET, SO_RCVTIMEO, &timeo, sizeof(timeo)) == -1){
         ERROR("setsockopt SO_RCVTIMEO");
@@ -109,9 +113,9 @@ int initsock(pid_t pid){
         ERROR("setsockopt SO_SNDTIMEO");
     }
 
-    struct icmp_filter echofilter;
-    echofilter.data = ICMP_ECHOREPLY;
-    if (setsockopt(socketd, SOL_RAW, ICMP_FILTER, &echofilter, sizeof(echofilter)) == -1){
+    struct icmp_filter filter;
+    filter.data = ~((1<<ICMP_DEST_UNREACH) | (1<<ICMP_TIME_EXCEEDED) |(1<<ICMP_ECHOREPLY));
+    if (setsockopt(socketd, SOL_RAW, ICMP_FILTER, &filter, sizeof(filter)) == -1){
         ERROR("setsockopt ICMP_FILTER");
     }
 
@@ -121,16 +125,32 @@ int initsock(pid_t pid){
     // setsockopt(sock, SOL_SOCKET, SO_ATTACH_FILTER, &filter, sizeof filter);
 
     return socketd;
-
 }
 
 static inline
 bool checkdup(const uint16_t bit){
-    if(recvtable[bit >> 3] & (1 << (bit & 0x07))){
-        return true;
-    }
+    if (recvtable[bit >> 3] & (1 << (bit & 0x07))) return true;
     recvtable[bit >> 3] |= (1 << (bit & 0x07));
     return false;
+}
+
+static inline
+void calcrtt(const struct timeval *timestamprep){
+    struct timeval timedif;
+    struct timeval timenow;
+
+    gettimeofday(&timenow, NULL);
+    timersub(&timenow, timestamprep, &timedif); // use the time stored in the packet
+    nrtt = timedif.tv_sec * 10000 + timedif.tv_usec;
+
+    if (hrtt < nrtt) hrtt = nrtt;
+    if (lrtt > nrtt) lrtt = nrtt;
+    if (!ortt){
+        ortt = nrtt;
+    }
+    else{
+        ortt = (suseconds_t)((7/8.) * (float)ortt) + ((float)nrtt * (1/8.));
+    }
 }
 
 void ping(const in_addr_t daddr, const uint8_t ttl){
@@ -175,10 +195,8 @@ void ping(const in_addr_t daddr, const uint8_t ttl){
     int32_t sentsize = 0;
     int32_t recvsize = 0;
 
-    struct timeval timenow;
-    struct timeval timedif;
-
     fprintf(stdout, HDRFMT, dha, PAYLOADSIZE, packetsize); fflush(stdout);
+
     while (r){
 send:
         recvtable[((sentnum + 1) % MAXDUP) >> 3] &= ~(1 << (((sentnum + 1) % MAXDUP) & 0x07));
@@ -191,36 +209,38 @@ send:
             goto send; // if we can't send keep trying.
         }
 
-        if ((recvsize = recvfrom(socketd, packetrep, packetsize, 0, NULL, NULL)) == -1 && !(errno & EINTR)){
-            fprintf(stderr, TMOFMT, RCVTIMEOUT, ntohs(icmp->un.echo.sequence)); fflush(stderr);
+        if ((recvsize = recvfrom(socketd, packetrep, packetsize, MSG_WAITALL, NULL, NULL)) == -1 && !(errno & EINTR)){
+            fprintf(stderr, TMOFMT, RCVTIMEO, ntohs(icmp->un.echo.sequence)); fflush(stderr);
             goto send; // we didn't get a reply in time, send again with the same seq
         }
         else if (errno & EINTR){
             --sentnum; // if we got were recvfrom was interrupted, ignore the last package we sent
             break;
         }
-        ++recvnum;
-        gettimeofday(&timenow, NULL);
 
-        // TODO: check for ECHO_REPLY codes
-        // TODO: check the checksum?
-        // TODO: there is a bug when pinging localhost, works fine if flooding, caused by sleep?
+        // TODO: check the checksum!
 
-        timersub(&timenow, timestamprep, &timedif); // use the time stored in the packet
-        nrtt = timedif.tv_sec * 10000 + timedif.tv_usec;
-        if (hrtt < nrtt) hrtt = nrtt;
-        if (lrtt > nrtt) lrtt = nrtt;
-        if (!ortt)
-            ortt = nrtt;
-        else
-            ortt = ((7/8.) * (float)ortt) + ((float)nrtt * (1/8.));
+        switch ((++recvnum, icmprep->type)){
+            case ICMP_ECHOREPLY:
+                calcrtt(timestamprep);
+                fprintf(stdout, OUTFMT, recvsize, dha, ntohs(icmprep->un.echo.sequence), iprep->ttl, nrtt/1000.0);
+                fprintf(stdout, (checkdup(htons(icmprep->un.echo.sequence) % MAXDUP) ? DUPFMT: "\n"));
+                // following the behaviour of ping, DUPs are not counted as lost packets.
+                break;
+            case ICMP_TIME_EXCEEDED:
+                // TODO:
+                break;
+            case ICMP_DEST_UNREACH:
+                // TODO:
+                break;
+            default:
+                break;
+        }
 
-        fprintf(stdout, OUTFMT, recvsize, dha, ntohs(icmprep->un.echo.sequence), iprep->ttl, nrtt/1000.0);
-        fprintf(stdout, (checkdup(htons(icmprep->un.echo.sequence) % MAXDUP) ? DUPFMT: "\n"));
-        // following the behaviour of ping, DUPs are not counted as lost packets.
         fflush(stdout);
-
         icmp->un.echo.sequence = htons(++seq);
+
+        sleepfn(1);
     }
 }
 
@@ -234,7 +254,7 @@ static
 void results(void){
     if (sentnum | recvnum) fprintf(stdout, RESFMT0);
     if (sentnum) fprintf(stdout, RESFMT1, sentnum, recvnum,100 - (100 * recvnum / (float)sentnum));
-    if (recvnum) fprintf(stdout, RESFMT2, lrtt / 1000.0, ortt / 1000.0, hrtt / 1000.0);
+    if (recvnum & ortt) fprintf(stdout, RESFMT2, lrtt / 1000.0, ortt / 1000.0, hrtt / 1000.0);
 }
 
 int main(const int argc, const char **argv){
@@ -247,7 +267,8 @@ int main(const int argc, const char **argv){
         if (argv[i][0] != '-' && strlen(argv[i]) != 2) { die: atexit(usage); ERROR("Unkown argument..."); }
         switch (argv[i][1]){
             case 'f':
-                // TODO:
+                f = true;
+                sleepfn = nullfn;
                 break;
             case 't':
                 ttl = atoi(argv[i + 1]);
@@ -267,9 +288,7 @@ int main(const int argc, const char **argv){
     // see: https://stackoverflow.com/a/3800915
     sigaction(SIGINT, &new, NULL); // handle ^C (ctrl-c)
 
-    atexit(results);
-
-    ping(inet_addr((dha = get_host_addr(argv[1]))), ttl);
+    ping(inet_addr((dha = get_host_addr(argv[1]), atexit(results), dha)), ttl);
 
     return 0;
 }
