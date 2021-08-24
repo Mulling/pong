@@ -105,10 +105,11 @@ int initsock(uint16_t pid){
 
     struct timeval timeo;
     timeo.tv_sec = f ? 0 : RCVTIMEO;
-    timeo.tv_usec = 0;
+    timeo.tv_usec = 1;
     if (setsockopt(socketd, SOL_SOCKET, SO_RCVTIMEO, &timeo, sizeof(timeo)) == -1){
         ERROR("setsockopt SO_RCVTIMEO");
     }
+    timeo.tv_usec = 0;
     if (setsockopt(socketd, SOL_SOCKET, SO_SNDTIMEO, &timeo, sizeof(timeo)) == -1){
         ERROR("setsockopt SO_SNDTIMEO");
     }
@@ -210,8 +211,7 @@ send:
         }
 recv:
         if ((recvsize = recvfrom(socketd, packetrep, packetsize, MSG_WAITALL, NULL, NULL)) == -1 && !(errno & EINTR)){
-            // fprintf(stderr, TMOFMT, RCVTIMEO, ntohs(icmp->un.echo.sequence)); fflush(stderr);
-            goto send; // we didn't get a reply in time, send again with the same seq
+            if (f) goto incs; else goto send; // we didn't get a reply in time send again with the same seq, if flooding don't wait.
         }
         else if (errno & EINTR){
             --sentnum; // if we got were recvfrom was interrupted, ignore the last package we sent
@@ -240,9 +240,10 @@ recv:
         }
 
         fflush(stdout);
-        icmp->un.echo.sequence = htons(++seq);
 
         sleepfn(1);
+incs:
+        icmp->un.echo.sequence = htons(++seq);
     }
 }
 
@@ -266,7 +267,7 @@ int main(const int argc, const char **argv){
     }
 
     for (int i = 2; i < argc; i+=2){
-        if (argv[i][0] != '-' && strlen(argv[i]) != 2) { die: atexit(usage); ERROR("Unkown argument..."); }
+        if (argv[i][0] != '-' || strlen(argv[i]) != 2) { die: atexit(usage); ERROR("Unkown argument..."); }
         switch (argv[i][1]){
             case 'f':
                 f = true;
