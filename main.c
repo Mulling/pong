@@ -239,7 +239,6 @@ void ping(const in_addr_t daddr){
             dha, PAYLOADSIZE, PACKETSIZE); fflush(stdout);
 
     while (r){
-send:
         recvtable[((sentnum + 1) % MAXDUP) >> 3] &= ~(1 << (((sentnum + 1) % MAXDUP) & 0x07));
         gettimeofday(timestamp, NULL);
         icmp->checksum = 0;
@@ -247,14 +246,15 @@ send:
         // TODO: replace sendto and recvfrom with sendmsg and recvmsg :)
         if ((sentnum++, sentsize = sendto(socketd, packetreq, PACKETSIZE, 0,
                         (struct sockaddr*)&servaddr, sizeof(servaddr))) < 1){
-            goto send; // if we can't send keep trying
+            sleepfn(RCVTIMEO);
+            continue; // if we can't send keep trying
         }
 recv:
         if ((recvsize = recvfrom(socketd, packetrep, PACKETSIZE, MSG_WAITALL, NULL, NULL)) == -1
                 && !(errno & EINTR)
                 && recvsize != PACKETSIZE){
             // we didn't get a reply in time send again with the same seq, if flooding don't wait
-            if (f) goto incs; else goto send;
+            if (f) goto incs; else continue;
         }
         else if (errno & EINTR){
             // FIXME: we should (AT LEAST) try to get all the packets we've sent before terminating
@@ -294,7 +294,7 @@ recv:
 
 chkf:
         fflush(stdout);
-        sleepfn(1);
+        sleepfn(RCVTIMEO);
 incs:
         icmp->un.echo.sequence = htons(++seq);
     }
