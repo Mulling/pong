@@ -2,7 +2,7 @@ CC := gcc
 
 CFLAGS := -Wall -Wextra -Werror -DDEBUG -g
 
-pong: main.c utils.c
+pong: main.c
 	$(CC) $(CFLAGS) -o $@ $^
 
 release: CFLAGS += -O2
