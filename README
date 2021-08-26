@@ -2,8 +2,7 @@ To compile you will need a working c compiler and make.
 
 $ sudo make release
 
-Why sudo? this is required to give permissions to the program, since only root root can
-create RAW sockets, release will give the same permissions of /usr/bin/ping to pong.
+sudo is required to give permissions to the program, since only root root can create RAW sockets, release will give the same permissions of /usr/bin/ping to pong. Or run it with: $ sudo ./pong
 
 USING:
     pong [target] [[-f] [-t time_to_live]]
@@ -13,8 +12,7 @@ OPTIONS:
         Host name/destination.
 
     -f 
-        Flood ping. Send ECHO_REQUEST and wait for ECHO_REPLY. Without waiting for
-        SO_RCVTIMEO, SO_SNDTIMEO and RCVTIMEO , which defaults to 1 second.
+        Flood ping. Send ECHO_REQUEST and wait for ECHO_REPLY. Without waiting for SO_RCVTIMEO, SO_SNDTIMEO and RCVTIMEO , which defaults to 1 second.
 
     -t 
         Set the time to live, defaults to 64.
