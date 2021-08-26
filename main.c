@@ -324,15 +324,17 @@ int main(const int argc, const char **argv){
         exit(0);
     }
 
-    for (int i = 2; i < argc; i+=2){
+    for (int i = 2; i < argc;){
         if (argv[i][0] != '-' || strlen(argv[i]) != 2) { die: atexit(usage); ERROR("Unkown argument..."); }
         switch (argv[i][1]){
             case 'f':
                 f = true;
                 sleepfn = nullfn;
+                ++i;
                 break;
             case 't':
                 ttl = atoi(argv[i + 1]);
+                i += 2;
                 break;
             default:
                 goto die;
