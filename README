@@ -12,7 +12,7 @@ OPTIONS:
         Host name/destination.
 
     -f 
-        Flood ping. Send ECHO_REQUEST and wait for ECHO_REPLY. Without waiting for SO_RCVTIMEO, SO_SNDTIMEO and RCVTIMEO , which defaults to 1 second.
+        Flood ping. Send ECHO_REQUEST and wait for ECHO_REPLY. Without waiting for SO_RCVTIMEO, SO_SNDTIMEO and RCVTIMEO.
 
     -t 
         Set the time to live, defaults to 64.
