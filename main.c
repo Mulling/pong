@@ -23,6 +23,7 @@ uint32_t ttl = 64;
 uint64_t seq = 1;
 uint64_t sentnum = 0;
 uint64_t recvnum = 0;
+uint64_t leftnum = 0;
 
 // time is stored in usec
 suseconds_t hrtt = 0;
@@ -219,6 +220,23 @@ static const char *icmp_time_exceeded_code[] = {
     ""
 };
 
+void sterrh(){
+    switch (errno){
+        case EHOSTUNREACH:
+            fprintf(stderr, "ERROR: host unreachable!\n");
+            fflush(stderr);
+            break;
+        case ENETUNREACH:
+            fprintf(stderr, "ERROR: network unreachable!\n");
+            fflush(stderr);
+            break;
+        case ENETDOWN:
+            fprintf(stderr, "ERROR: network down!\n");
+            fflush(stderr);
+            break;
+    }
+}
+
 void ping(const in_addr_t daddr){
     pid_t pid = getpid();
     uint16_t id = (uint16_t)(pid >> 16) ^ (pid & 0xFF);
@@ -238,16 +256,21 @@ void ping(const in_addr_t daddr){
     fprintf(stdout, "PONGING %s %d bytes of data (%lu total).\n",
             dha, PAYLOADSIZE, PACKETSIZE); fflush(stdout);
 
-    while (r){
+    while (r || leftnum){
         recvtable[((sentnum + 1) % MAXDUP) >> 3] &= ~(1 << (((sentnum + 1) % MAXDUP) & 0x07));
         gettimeofday(timestamp, NULL);
         icmp->checksum = 0;
         icmp->checksum = checksum((uint16_t*)icmp, sizeof(struct icmphdr) + PAYLOADSIZE);
         // TODO: replace sendto and recvfrom with sendmsg and recvmsg :)
-        if ((sentnum++, sentsize = sendto(socketd, packetreq, PACKETSIZE, 0,
+        if (!leftnum && (sentnum++, sentsize = sendto(socketd, packetreq, PACKETSIZE, 0,
                         (struct sockaddr*)&servaddr, sizeof(servaddr))) < 1){
+            sterrh();
             sleepfn(RCVTIMEO);
             continue; // if we can't send keep trying
+        }
+        else if (errno & EINTR){
+            errno = 0;
+            continue;
         }
 recv:
         if ((recvsize = recvfrom(socketd, packetrep, PACKETSIZE, MSG_WAITALL, NULL, NULL)) == -1
@@ -257,11 +280,9 @@ recv:
             if (f) goto incs; else continue;
         }
         else if (errno & EINTR){
-            // FIXME: we should (AT LEAST) try to get all the packets we've sent before terminating
-            // because we can get some trash that was sent by other service, and we didn't get all
-            // our packets. This will also cause packet loss when flooding.
-            --sentnum; // if we got were recvfrom was interrupted, ignore the last package we sent
-            break;
+            if (!f) --sentnum; // if we got were recvfrom was interrupted, ignore the last package we sent
+            errno = 0;
+            continue;
         }
 
         if (!chkchksum(icmprep)){
@@ -285,10 +306,13 @@ recv:
                         ttl, icmp_time_exceeded_code[icmprep->code >= 2 ? 2 : icmprep->code]);
                 break;
             case ICMP_DEST_UNREACH:
+                // don't count DEST_UNREAD as received packets
+                --recvnum;
                 fprintf(stdout, "destination host unreachable! code= %s\n",
                         icmp_dest_unreach_code[icmprep->code >= 6 ? 6 : icmprep->code]);
                 break;
             default:
+                // we can't get here because of the filter
                 break;
         }
 
@@ -296,7 +320,7 @@ chkf:
         fflush(stdout);
         sleepfn(RCVTIMEO);
 incs:
-        icmp->un.echo.sequence = htons(++seq);
+        if (leftnum) --leftnum; else icmp->un.echo.sequence = htons(++seq);
     }
 }
 
@@ -304,6 +328,7 @@ static
 void siginth(int x){
     (void)(x);
     r = false;
+    if (f) leftnum = sentnum - recvnum;
 }
 
 static
