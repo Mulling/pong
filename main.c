@@ -31,7 +31,7 @@
 #include <time.h>
 #include <unistd.h>
 
-const char *dha = NULL; // destiny host name
+const char *dha = NULL; // destiny host address
 
 uint32_t ttl = 64;
 uint64_t seq = 1;
@@ -70,10 +70,10 @@ struct icmphdr *icmprep = (struct icmphdr*)(packetrep + ICMPOFF);
 struct timeval *timestamprep = (struct timeval*)(packetrep + TIMEOFF);
 
 static
-uint32_t(*sleepfn)(uint32_t) = sleep;
+uint32_t(*sleepfn)(const uint32_t) = sleep;
 
 static
-uint32_t nullfn(uint32_t x){ (void)x; return 0; };
+uint32_t nullfn(const uint32_t __attribute__((unused)) x){; return 0; }
 
 static
 void usage(void){
@@ -83,7 +83,7 @@ void usage(void){
 }
 
 // source: https://datatracker.ietf.org/doc/html/rfc1071
-static inline
+static inline __attribute__((always_inline))
 uint16_t checksum(const uint16_t *buffer, size_t len){
     register uint64_t sum = 0;
 
@@ -130,7 +130,7 @@ const char *get_host_addr(const char *hname){
 }
 
 static
-int initsock(uint16_t pid){
+int initsock(const uint16_t __attribute__((unused)) pid){
     int socketd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (socketd < 0){ ERROR("Fail to create a socket, run with root privileges..."); }
 
@@ -156,7 +156,6 @@ int initsock(uint16_t pid){
         ERROR("setsockopt ICMP_FILTER");
     }
 
-    (void)(pid);
     // TODO: figure this out
     // struct sock_fprog idfilter;
     // setsockopt(sock, SOL_SOCKET, SO_ATTACH_FILTER, &filter, sizeof filter);
@@ -384,7 +383,7 @@ int main(const int argc, const char **argv){
     new.sa_handler = siginth;
     new.sa_flags = 0;
     sigemptyset(&new.sa_mask);
-    // NOTE: we can't use signal where because it fucks with the syscalls
+    // NOTE: we can't use signal here because it fucks with the syscalls
     // and we lose a packet. Default to the Linus way of handling this
     // even tough is "wrong"
     // see: https://stackoverflow.com/a/3800915

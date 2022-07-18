@@ -1,11 +1,16 @@
 CC := gcc
 
-CFLAGS := -Wall -Wextra -Werror -DDEBUG -g
+CFLAGS := -Wall -Wextra -Werror -Wpedantic -DDEBUG -g -pipe
 
-pong: main.c
-	$(CC) $(CFLAGS) -o $@ $^
+SRC = $(wildcard *.c)
+OBJ = $(SRC:.c=.o)
 
-release: CFLAGS += -O2
+all: pong
+
+pong: ${OBJ}
+	$(CC) ${CFLAGS} -o $@ $^
+
+release: CFLAGS += -O3
 release: CFLAGS := $(filter-out -DDEBUG, $(CFLAGS))
 release: CFLAGS := $(filter-out -g, $(CFLAGS))
 release: pong
@@ -18,3 +23,4 @@ clean:
 	rm -f *.o
 
 .PHONY: clean release
+.EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))
