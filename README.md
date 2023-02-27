@@ -1,11 +1,24 @@
-To compile you will need a working c compiler and make.
+# Basic ping implementation
 
+We don't required sudo to flood.
+
+## Using:
+
+To compile you will need a working C compiler and make (sudo is required to give permissions to the program, since only root can create RAW sockets):
+
+```bash
 $ sudo make release
+```
 
-sudo is required to give permissions to the program, since only root can create RAW sockets. Or run it with:
+Or:
 
+```bash
 $ sudo ./pong
+```
 
+Usage is defined as below:
+
+```
 USING:
     pong [target] [[-f] [-t time_to_live]]
 
@@ -21,3 +34,8 @@ OPTIONS:
 
     SIGINT
         Ends the ping and prints results.
+```
+
+## TODO:
+- [ ] Propper packet filter.
+- [ ] Hog the network.
