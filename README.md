@@ -1,6 +1,6 @@
 # Basic ping implementation
 
-We don't required sudo to flood.
+We don't require sudo to flood.
 
 ## Using:
 
