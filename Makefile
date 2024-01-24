@@ -1,20 +1,26 @@
-CFLAGS := -Wall -Wextra -Werror -Wpedantic -DDEBUG -g -pipe -fsanitize=address -fsanitize=undefined
-
-SRC = $(wildcard *.c)
-OBJ = $(SRC:.c=.o)
+PONGFLAGS := -Wall -Wextra -Wpedantic -DDEBUG -g -pipe -fsanitize=address -fsanitize=undefined ${CFLAGS}
 
 all: pong
 
-pong: ${OBJ}
+main.o: main.c
+	$(CC) ${CFLAGS} -c $^ -o $@
+
+pong: main.o
 	$(CC) ${CFLAGS} -o $@ $^
 
-release: CFLAGS = -O3 -march=native -mtune=native
-release: all
-	strip pong
-	sudo setcap 'cap_net_raw+ep' pong
-
 clean:
-	rm -f pong *.o
+	$(RM) -f pong *.o
 
-.PHONY: all clean release
+release: PONGFLAGS = -Wall -Wextra -Werror -Wpedantic -O3 -march=native -mtune=native ${CFLAGS}
+release: pong
+	strip pong
+	setcap 'cap_net_raw+ep' pong
+
+install: release
+	cp -f pong $(DESTDIR)$(PREFIX)/bin
+
+uninstall:
+	$(RM) $(DESTDIR)$(PREFIX)/bin/pong
+
+.PHONY: clean release install uninstall
 .EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))
