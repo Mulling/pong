@@ -18,6 +18,7 @@ release: pong
 
 install: release
 	cp -f pong $(DESTDIR)$(PREFIX)/bin
+	setcap 'cap_net_raw+ep' $(DESTDIR)$(PREFIX)/bin/pong
 
 uninstall:
 	$(RM) $(DESTDIR)$(PREFIX)/bin/pong
