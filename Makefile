@@ -1,4 +1,4 @@
-PONGFLAGS := -Wall -Wextra -Wpedantic -DDEBUG -g -pipe -fsanitize=address -fsanitize=undefined ${CFLAGS}
+PONGFLAGS := -Wall -Wextra -Wpedantic -DDEBUG -g -pipe -fsanitize=address,undefined -fanalyzer ${CFLAGS}
 
 PREFIX ?= /usr/bin
 
@@ -13,7 +13,7 @@ pong: main.o
 clean:
 	$(RM) -f pong *.o
 
-release: PONGFLAGS = -Wall -Wextra -Werror -Wpedantic -O3 -march=native -mtune=native ${CFLAGS}
+release: PONGFLAGS = -Wall -Wextra -Werror -Wpedantic -O3 ${CFLAGS}
 release: pong
 	strip pong
 	setcap 'cap_net_raw+ep' pong
