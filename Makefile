@@ -1,5 +1,7 @@
 PONGFLAGS := -Wall -Wextra -Wpedantic -DDEBUG -g -pipe -fsanitize=address -fsanitize=undefined ${CFLAGS}
 
+PREFIX ?= /usr/bin
+
 all: pong
 
 main.o: main.c
@@ -17,11 +19,11 @@ release: pong
 	setcap 'cap_net_raw+ep' pong
 
 install: release
-	cp -f pong $(DESTDIR)$(PREFIX)/bin
-	setcap 'cap_net_raw+ep' $(DESTDIR)$(PREFIX)/bin/pong
+	cp -f pong $(DESTDIR)$(PREFIX)
+	setcap 'cap_net_raw+ep' $(DESTDIR)$(PREFIX)/pong
 
 uninstall:
-	$(RM) $(DESTDIR)$(PREFIX)/bin/pong
+	$(RM) $(DESTDIR)$(PREFIX)/pong
 
 .PHONY: clean release install uninstall
 .EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))
