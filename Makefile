@@ -1,29 +1,29 @@
-PONGFLAGS := -Wall -Wextra -Wpedantic -DDEBUG -g -pipe -fsanitize=address,undefined -fanalyzer ${CFLAGS}
+include config.mk
 
-PREFIX ?= /usr/bin
+CFLAGS ?= ${PONGFLAGS}
 
-all: pong
+debug: CFLAGS := ${PONG_DEBUG_FLAGS} ${CFLAGS}
+debug: pong
 
 main.o: main.c
-	$(CC) ${CFLAGS} -c $^ -o $@
+	$(QUIET_CC)$(CC) ${CFLAGS} -c $^ -o $@
 
 pong: main.o
-	$(CC) ${CFLAGS} -o $@ $^
+	$(QUIET_CC)$(CC) ${CFLAGS} -o $@ $^
 
 clean:
-	$(RM) -f pong *.o
+	$(QUIET_RM)$(RM) -f pong *.o
 
-release: PONGFLAGS = -Wall -Wextra -Werror -Wpedantic -O3 ${CFLAGS}
-release: pong
-	strip pong
-	setcap 'cap_net_raw+ep' pong
+$(DESTDIR)$(PREFIX)/pong: pong
+	$(QUIET_MKDIR) mkdir -p $(DESTDIR)$(PREFIX)
+	$(QUIET_CP) cp -f pong $(DESTDIR)$(PREFIX)
+	$(QUIET_STRIP) strip $(DESTDIR)$(PREFIX)/pong
+	$(QUIET_SETCAP) setcap 'cap_net_raw+ep' $(DESTDIR)$(PREFIX)/pong
 
-install: release
-	cp -f pong $(DESTDIR)$(PREFIX)
-	setcap 'cap_net_raw+ep' $(DESTDIR)$(PREFIX)/pong
+install: $(DESTDIR)$(PREFIX)/pong
 
 uninstall:
 	$(RM) $(DESTDIR)$(PREFIX)/pong
 
-.PHONY: clean release install uninstall
+.PHONY: clean debug install uninstall
 .EXTRA_PREREQS := $(abspath $(lastword $(MAKEFILE_LIST)))

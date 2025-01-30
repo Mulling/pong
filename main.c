@@ -83,8 +83,8 @@ static void usage(void) {
 }
 
 // source: https://datatracker.ietf.org/doc/html/rfc1071
-static inline __attribute__((always_inline)) uint16_t checksum(
-    const uint16_t* buffer, size_t len) {
+static inline __attribute__((always_inline)) uint16_t
+checksum(const uint16_t* buffer, size_t len) {
     register uint64_t sum = 0;
 
     while (len > 1) {
@@ -92,7 +92,8 @@ static inline __attribute__((always_inline)) uint16_t checksum(
         len -= 2;
     }
 
-    if (len) sum += *(uint8_t*)buffer;
+    if (len)
+        sum += *(uint8_t*)buffer;
     sum = (sum & 0xFFFF) + (sum >> 16);
     sum += (sum >> 16);
 
@@ -173,7 +174,8 @@ static int initsock(const uint16_t __attribute__((unused)) pid) {
 }
 
 static inline bool checkdup(const uint16_t bit) {
-    if (recvtable[bit >> 3] & (1 << (bit & 0x07))) return true;
+    if (recvtable[bit >> 3] & (1 << (bit & 0x07)))
+        return true;
     recvtable[bit >> 3] |= (1 << (bit & 0x07));
     return false;
 }
@@ -187,8 +189,10 @@ static inline void calcrtt(const struct timeval* timestamprep) {
              &timedif);  // use the time stored in the packet
     nrtt = timedif.tv_sec * 10000 + timedif.tv_usec;
 
-    if (hrtt < nrtt) hrtt = nrtt;
-    if (lrtt > nrtt) lrtt = nrtt;
+    if (hrtt < nrtt)
+        hrtt = nrtt;
+    if (lrtt > nrtt)
+        lrtt = nrtt;
     if (!ortt) {
         ortt = nrtt;
     } else {
@@ -373,11 +377,13 @@ void ping(const in_addr_t daddr) {
 static void siginth(int x) {
     (void)(x);
     r = false;
-    if (f) leftnum = sentnum - recvnum;
+    if (f)
+        leftnum = sentnum - recvnum;
 }
 
 static void results(void) {
-    if (sentnum | recvnum) fprintf(stdout, "\nRESULTS:\n");
+    if (sentnum | recvnum)
+        fprintf(stdout, "\nRESULTS:\n");
     if (sentnum && recvnum <= sentnum)
         fprintf(stdout, "sent=%lu received=%lu (%.1f%% packet loss.)\n",
                 sentnum, recvnum, 100 - (100 * recvnum / (float)sentnum));
@@ -393,7 +399,7 @@ int main(const int argc, const char** argv) {
     }
 
     for (int i = 2; i < argc;) {
-        if (argv[i][0] != '-' || strlen(argv[i]) != 2) {
+        if (argv[i] == NULL || argv[i][0] != '-' || strlen(argv[i]) != 2) {
         die:
             atexit(usage);
             ERROR("Unkown argument...");
